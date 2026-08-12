@@ -531,3 +531,5 @@ st.caption(
     "Built on every Coinbase candle since this coin listed. Patterns are historical tendencies, "
     "not guarantees — size positions you can afford to lose."
 )
+/ /   T r i g g e r e d   b y   a u t o m a t e d   r e d e p l o y   t e s t  
+ 

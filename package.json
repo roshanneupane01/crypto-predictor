@@ -22,5 +22,22 @@
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/roshanneupane01/crypto-predictor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/roshanneupane01/crypto-predictor/issues"
+  },
+  "homepage": "https://github.com/roshanneupane01/crypto-predictor#readme"
 }

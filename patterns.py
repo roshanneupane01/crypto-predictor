@@ -73,49 +73,74 @@ _DAILY_HORIZON_DAYS = 540
 _HOURLY_HORIZON_DAYS = 400
 
 
-def _refresh_product(product_id: str) -> bool:
-    """Sync local cache (tail-fetch). Returns True if new data was written.
-
-    IMPORTANT: must not touch st.session_state / st.rerun — called from a
-    background thread with no script context.
-    """
+def _refresh_daily(product_id: str) -> bool:
+    """Only the fast part: daily candles. ~1s cold. Returns whether new data was written."""
+    gran = 86400
     now = dt.datetime.now(dt.timezone.utc)
-    wrote = False
-    for gran, horizon_days in ((86400, _DAILY_HORIZON_DAYS), (3600, _HOURLY_HORIZON_DAYS)):
-        latest = cache.latest_ts(product_id, gran)
-        if latest is None:
-            start = now - dt.timedelta(days=horizon_days)
-        else:
-            start = dt.datetime.fromtimestamp(latest + 1, tz=dt.timezone.utc)
-            start -= dt.timedelta(seconds=gran * 2)  # small overlap to heal gaps
-        if (now - start).total_seconds() < gran * 10:
-            continue
-        df = _fetch_chunk(product_id, gran, start, now)
-        if df.empty:
-            continue
+    latest = cache.latest_ts(product_id, gran)
+    if latest is None:
+        start = now - dt.timedelta(days=_DAILY_HORIZON_DAYS)
+    else:
+        start = dt.datetime.fromtimestamp(latest + 1, tz=dt.timezone.utc) - dt.timedelta(days=2)
+    if (now - start).total_seconds() < gran * 10:
+        return False
+    df = _fetch_chunk(product_id, gran, start, now)
+    if not df.empty:
         cache.upsert(product_id, gran, df)
-        wrote = True
-    return wrote
+        return True
+    return False
+
+
+def _refresh_hourly(product_id: str) -> bool:
+    """Slow hourly backfill. Never call from Streamlit main thread on cold start."""
+    now = dt.datetime.now(dt.timezone.utc)
+    latest = cache.latest_ts(product_id, 3600)
+    if latest is None:
+        start = now - dt.timedelta(days=_HOURLY_HORIZON_DAYS)
+    else:
+        start = dt.datetime.fromtimestamp(latest + 1, tz=dt.timezone.utc) - dt.timedelta(hours=3)
+    if (now - start).total_seconds() < 3600 * 10:
+        return False
+    df = _fetch_chunk(product_id, 3600, start, now)
+    if not df.empty:
+        cache.upsert(product_id, 3600, df)
+        return True
+    return False
 
 
 def _start_refresh(product_id: str):
-    """Kick off a background tail-refresh, safe to call from a Streamlit script
-    and also from threads that lack a script run context."""
-    refresh_once = getattr(_start_refresh, "_inflight", set())
-    if product_id in refresh_once:
+    """Background tail-refresh: fast daily first (non-blocking), then hourly
+    on a thread. Safe from scripts and worker threads."""
+    inflight = getattr(_start_refresh, "_inflight", set())
+    if product_id in inflight:
         return
-    refresh_once.add(product_id)
-    _start_refresh._inflight = refresh_once
+    inflight.add(product_id)
+    _start_refresh._inflight = inflight
 
     def run():
         try:
-            _refresh_product(product_id)
+            _refresh_daily(product_id)
         except Exception:
             pass
-        finally:
-            refresh_once.discard(product_id)
 
     threading.Thread(target=run, daemon=True).start()
+
+    # hourly runs even later / on its own slow thread so UI never blocks on it
+    def run_hourly():
+        try:
+            _refresh_hourly(product_id)
+        except Exception:
+            pass
+
+    def run_both():
+        try:
+            t = threading.Thread(target=run_hourly, daemon=True)
+            t.start()
+            t.join(timeout=60)  # keep under ~1 min even on slow networks
+        finally:
+            inflight.discard(product_id)
+
+    threading.Thread(target=run_both, daemon=True).start()
 
 
 def _cached_history_uncached(product_id: str):
@@ -131,21 +156,16 @@ def _cached_history(product_id: str, _v: int = 0):
 
 def get_full_history(product_id: str):
     """
-    Instant when cached. On a cold start for a new coin we block once BUT show
-    a live progress line instead of a bare spinner, and skip the heavy hourly
-    backfill if we already have enough daily candles to render the page.
+    Daily backfill is fast enough to wait for (sub-second). Hourly is the slow
+    one — it ALWAYS runs in the background; the UI doesn't wait on it.
     """
     daily, hourly = _cached_history(product_id)
     if daily.empty or len(daily) < 40:
-        # cold path: keep the user informed instead of an unexplained spinner
-        ph = st.empty()
-        ph.info(f"Fetching history for **{product_id}** (first load for this coin)…")
-        _refresh_product(product_id)
-        daily, hourly = _cached_history_uncached(product_id)
-        if not daily.empty:
-            ph.success(f"Got {len(daily)} daily candles for {product_id}.")
-        else:
-            ph.empty()
+        _refresh_daily(product_id)
+        daily = cache.get_cached(product_id, 86400)
+        _start_refresh(product_id)  # kick hourly in background
+        if daily.empty or len(daily) < 40:
+            return daily, hourly  # genuinely no data; UI handles it
     else:
         _start_refresh(product_id)
     return daily, hourly
@@ -163,14 +183,27 @@ def prefetch_popular(products, quote: str = "USD"):
         if any(p["id"] == pid for p in products):
             ids.append(pid)
 
-    def warm():
-        for pid in ids:
+    from queue import Queue
+    q = Queue()
+    for pid in ids:
+        q.put(pid)
+
+    def worker():
+        while True:
             try:
-                _refresh_product(pid)
+                pid = q.get_nowait()
+            except Exception:
+                return
+            try:
+                _refresh_daily(pid)
+                _refresh_hourly(pid)
             except Exception:
                 pass
+            finally:
+                q.task_done()
 
-    threading.Thread(target=warm, daemon=True).start()
+    for _ in range(3):  # 3 parallel workers = ~3x faster warmup
+        threading.Thread(target=worker, daemon=True).start()
 
 
 # ------------------------------------------------------------------ pivots

@@ -1,5 +1,7 @@
+"""
+TradeSnapshot - Crypto trading insights with live prices
+"""
 import datetime as dt
-
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -38,8 +40,6 @@ _TZ_HTML = """
 })();
 </script>
 """
-# components.v1.html is available on every Streamlit version; only fall back
-# to the newer iframe API if a future build removes it.
 try:
     st.components.v1.html(_TZ_HTML, height=0, scrolling=False)
 except Exception:
@@ -56,7 +56,7 @@ if _qp is not None:
         pass
 TZ_LABEL = local_tz_label()
 
-# ---------- page styling (Coinbase-ish dark theme) ----------
+# ---------- page styling ----------
 st.markdown("""
 <style>
 :root { --gain:#16c784; --loss:#ea3943; --ink:#e6e9f0; --sub:#9aa4b2; --card:#1b2130; }
@@ -72,20 +72,15 @@ st.markdown("""
 .badge.gain { background: rgba(22,199,132,.14); color: var(--gain); }
 .badge.loss { background: rgba(234,57,67,.14); color: var(--loss); }
 .badge.gray { background: rgba(154,164,178,.14); color: var(--sub); }
-.card {
-  background: var(--card); border: 1px solid rgba(255,255,255,.06);
-  border-radius: 14px; padding: 14px 16px; margin-bottom: 10px;
-}
-.card .lab { color: var(--sub); font-size: .78rem; text-transform: uppercase;
-  letter-spacing: .06em; margin-bottom: 4px; }
+.card { background: var(--card); border: 1px solid rgba(255,255,255,.06); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; }
+.card .lab { color: var(--sub); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
 .card .val { font-size: 1.15rem; font-weight: 700; }
 .card .val.green { color: var(--gain); }
 .card .val.red { color: var(--loss); }
 .card .sub { color: var(--sub); font-size: .8rem; margin-top: 3px; }
 .mini-note { color: var(--sub); font-size: .82rem; }
 .mini-note b { color: #d8dee9; }
-div[data-testid="stMetric"] { background: var(--card); border: 1px solid rgba(255,255,255,.06);
-  border-radius: 14px; padding: 12px 14px; }
+div[data-testid="stMetric"] { background: var(--card); border: 1px solid rgba(255,255,255,.06); border-radius: 14px; padding: 12px 14px; }
 hr { border: none; border-top: 1px solid rgba(255,255,255,.06); margin: 1.2rem 0; }
 </style>
 """, unsafe_allow_html=True)
@@ -130,7 +125,7 @@ def friendly_day(ts):
 # ---------------- header + search ----------------
 products = get_all_products()
 _ALL_NAMES = get_currency_names()
-prefetch_popular(products)  # background warm so popular coins are instant
+prefetch_popular(products)
 
 st.title("📈 TradeSnapshot")
 st.caption(f"Patterns & trade timing for any Coinbase coin · times in your local time ({TZ_LABEL})")
@@ -239,7 +234,7 @@ elif sig["tone"] == "red":
 else:
     st.info(f"**{sig['emoji']} {sig['verdict']}**")
 
-# ---- compute best hours here so the cards can show times ----
+# ---- compute best hours ----
 ht = hourly_table(hourly)
 wt = weekday_table(daily)
 best_buy_hour_txt = best_sell_hour_txt = None
@@ -254,7 +249,7 @@ if not wt.empty:
 else:
     wday = sday = None
 
-# ---- hero cards: the actual next actions ----
+# ---- hero cards ----
 now_str = pd.Timestamp.now().strftime("%I:%M %p").lstrip("0")
 c1, c2, c3, c4 = st.columns(4)
 e_lo, e_hi = plan["entry_zone"]
@@ -265,7 +260,7 @@ c1.markdown(
     f'<div class="val green">{fmt(e_lo)} – {fmt(e_hi)}</div>'
     f'<div class="sub">expect a dip here · <b>{friendly_day(plan["entry_day_ideal"])}</b>'
     + (f" around <b>{best_buy_hour_txt}</b>" if best_buy_hour_txt else "")
-    + f" {TZ_LABEL} · {zone_note}</div></div>",
+    + f" {TZ_LABEL} · {zone_note}</div></div>',
     unsafe_allow_html=True,
 )
 s_lo, s_hi = plan.get("sell_zone", (plan["sell_target"] * .95, plan["sell_target"] * 1.05))
@@ -274,7 +269,7 @@ c2.markdown(
     f'<div class="val red">{fmt(s_lo)} – {fmt(s_hi)}</div>'
     f'<div class="sub">expect a bounce to here, then a pullback · take profit ~<b>{friendly_day(plan["exit_day_ideal"])}</b>'
     + (f" around <b>{best_sell_hour_txt}</b>" if best_sell_hour_txt else "")
-    + f" {TZ_LABEL} · ~{plan['leg_ret_pct']:+.0f}% from entry</div></div>",
+    + f" {TZ_LABEL} · ~{plan['leg_ret_pct']:+.0f}% from entry</div></div>',
     unsafe_allow_html=True,
 )
 c3.markdown(
@@ -287,8 +282,7 @@ c3.markdown(
 c4.markdown(
     f'<div class="card"><div class="lab">Stop / risk</div>'
     f'<div class="val">{fmt(plan["stop_loss"])}</div>'
-    f'<div class="sub">risk {plan["risk_pct"]:.0f}% · reward {plan["reward_pct"]:.0f}% · '
-    f'1:{plan["risk_reward"]:.1f} RR</div></div>',
+    f'<div class="sub">risk {plan["risk_pct"]:.0f}% · reward {plan["reward_pct"]:.0f}% · 1:{plan["risk_reward"]:.1f} RR</div></div>',
     unsafe_allow_html=True,
 )
 
@@ -308,7 +302,6 @@ fig.add_trace(go.Scatter(
     hovertemplate="%{x|%b %d %Y}: $%{y:,.4g}<extra></extra>",
 ))
 
-# shaded bull / bear runs
 run_colors = {"bull": "rgba(22,199,132,.13)", "bear": "rgba(234,57,67,.13)"}
 last_pv = chart_df["date"].iloc[-1]
 for r in runs:
@@ -318,14 +311,12 @@ for r in runs:
     fig.add_vrect(x0=x0, x1=r["end"], fillcolor=run_colors[r["type"]],
                   layer="below", line_width=0)
 
-# projected path
 proj = forecast_path(df, plan)
 fig.add_trace(go.Scatter(
     x=proj["date"], y=proj["price"], name="Projected path",
     line=dict(color="#f7b500", width=2.4, dash="dash"),
     hovertemplate="~%{x|%b %d %Y}: $%{y:,.4g}<extra></extra>",
 ))
-# marker: entry zone
 fig.add_hrect(y0=e_lo, y1=e_hi, fillcolor="rgba(22,199,132,.10)", line_width=0,
               annotation_text="buy zone", annotation_position="bottom left")
 fig.add_hline(y=plan["entry_price"], line_dash="dot", line_color="#16c784", line_width=1)
@@ -342,7 +333,7 @@ fig.update_xaxes(showgrid=False)
 fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,.06)")
 st.plotly_chart(fig, use_container_width=True)
 
-# ---- run history table (when did past runs start/end, how big) ----
+# ---- run history table ----
 r1c, r2c = st.columns([2, 1])
 with r1c:
     st.markdown("**Past runs**")
@@ -531,5 +522,3 @@ st.caption(
     "Built on every Coinbase candle since this coin listed. Patterns are historical tendencies, "
     "not guarantees — size positions you can afford to lose."
 )
-/ /   T r i g g e r e d   b y   a u t o m a t e d   r e d e p l o y   t e s t  
- 

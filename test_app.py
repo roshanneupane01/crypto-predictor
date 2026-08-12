@@ -6,9 +6,13 @@ import time
 import traceback
 import warnings
 import datetime as dt
+import os
 
 warnings.filterwarnings("ignore")
-sys.path.insert(0, r"C:\Users\rosha\crypto-predictor")
+
+# Get the directory of this script instead of hardcoding
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
 
 import patterns as pat  # noqa: E402
 import analysis as an  # noqa: E402
@@ -102,7 +106,8 @@ _APP_SRC = None
 def t_badges_make_sense():
     global _APP_SRC
     if _APP_SRC is None:
-        with open(r"C:\Users\rosha\crypto-predictor\app.py", encoding="utf-8") as f:
+        app_path = os.path.join(SCRIPT_DIR, "app.py")
+        with open(app_path, encoding="utf-8") as f:
             _APP_SRC = f.read()
     buy = _APP_SRC.find("Next buy zone")
     sell = _APP_SRC.find("Sell target")

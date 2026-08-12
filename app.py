@@ -5,7 +5,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
 from streamlit_searchbox import st_searchbox
 
 from coinbase_api import (
@@ -23,6 +22,7 @@ from patterns import (
 st.set_page_config(page_title="TradeSnapshot", page_icon="📈", layout="wide")
 
 # ---------- inject browser local-time offset ----------
+# st.iframe is the modern (>1.33) API for this; fall back for older Streamlit
 _TZ_HTML = """
 <script>
 (function() {
@@ -39,7 +39,10 @@ _TZ_HTML = """
 })();
 </script>
 """
-components.html(_TZ_HTML, height=0, scrolling=False)
+if hasattr(st, "iframe"):
+    st.iframe("data:text/html," + _TZ_HTML.replace("\n", "%20"), height=0, scrolling=False)
+else:
+    st.components.v1.html(_TZ_HTML, height=0, scrolling=False)
 
 _qp = st.query_params.get("tz_off")
 if _qp is not None:
@@ -122,8 +125,8 @@ def friendly_day(ts):
 
 # ---------------- header + search ----------------
 products = get_all_products()
-prefetch_popular(products)  # warm the cache for common coins in the background
 _ALL_NAMES = get_currency_names()
+prefetch_popular(products)  # background warm so popular coins are instant
 
 st.title("📈 TradeSnapshot")
 st.caption(f"Patterns & trade timing for any Coinbase coin · times in your local time ({TZ_LABEL})")
@@ -179,7 +182,11 @@ NAME = get_currency_names().get(BASE.upper()) or prod["display_name"]
 # ---------------- load data (instant after first touch) ----------------
 daily, hourly = get_full_history(selected)
 if daily.empty or len(daily) < 60:
-    st.error("Not enough Coinbase history for this coin yet.")
+    st.warning(
+        f"Coinbase has very little history for **{BASE}** yet "
+        f"({len(daily)} daily candles). The app needs at least ~60 days to find patterns. "
+        "Try a more established coin from the list."
+    )
     st.stop()
 
 df = compute_indicators(daily)
@@ -359,9 +366,9 @@ with r2c:
         unsafe_allow_html=True,
     )
     st.markdown(
-        f'<div class="card"><div class="lab">All-time</div>'
-        f'<div class="val">ATH {fmt(stats["ath"])}</div>'
-        f'<div class="sub">{stats["pct_from_ath"]:+.1f}% now · {stats["ath_date"]}</div></div>',
+        f'<div class="card"><div class="lab">Highs & lows</div>'
+        f'<div class="val">H {fmt(stats["ath"])}</div>'
+        f'<div class="sub">L {fmt(stats["atl"])} · {stats["pct_from_ath"]:+.1f}% from high · {stats["ath_date"]}</div></div>',
         unsafe_allow_html=True,
     )
 

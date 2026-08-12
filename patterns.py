@@ -67,10 +67,21 @@ def _fetch_chunk(product_id: str, granularity: int,
               .reset_index(drop=True))
 
 
-def _refresh_product(product_id: str):
-    """Sync local cache with Coinbase (tail-fetch only). Runs in background."""
+# We only need enough history for the swing + seasonality analysis the app shows,
+# not the whole chart. 540d daily / 400d hourly keeps cold fetches under a few seconds.
+_DAILY_HORIZON_DAYS = 540
+_HOURLY_HORIZON_DAYS = 400
+
+
+def _refresh_product(product_id: str) -> bool:
+    """Sync local cache (tail-fetch). Returns True if new data was written.
+
+    IMPORTANT: must not touch st.session_state / st.rerun — called from a
+    background thread with no script context.
+    """
     now = dt.datetime.now(dt.timezone.utc)
-    for gran, horizon_days in ((86400, 9000), (3600, 1460)):
+    wrote = False
+    for gran, horizon_days in ((86400, _DAILY_HORIZON_DAYS), (3600, _HOURLY_HORIZON_DAYS)):
         latest = cache.latest_ts(product_id, gran)
         if latest is None:
             start = now - dt.timedelta(days=horizon_days)
@@ -83,54 +94,83 @@ def _refresh_product(product_id: str):
         if df.empty:
             continue
         cache.upsert(product_id, gran, df)
-        if latest is None:
-            st.cache_data.clear()  # invalidate the cached get_full_history
+        wrote = True
+    return wrote
 
 
 def _start_refresh(product_id: str):
-    if st.session_state.get(f"_refreshing_{product_id}"):
+    """Kick off a background tail-refresh, safe to call from a Streamlit script
+    and also from threads that lack a script run context."""
+    refresh_once = getattr(_start_refresh, "_inflight", set())
+    if product_id in refresh_once:
         return
-    st.session_state[f"_refreshing_{product_id}"] = True
+    refresh_once.add(product_id)
+    _start_refresh._inflight = refresh_once
 
     def run():
         try:
             _refresh_product(product_id)
+        except Exception:
+            pass
         finally:
-            st.session_state[f"_refreshing_{product_id}"] = False
+            refresh_once.discard(product_id)
 
     threading.Thread(target=run, daemon=True).start()
 
 
-@st.cache_data(ttl=15 * 60, show_spinner=False)
-def _cached_history(product_id: str, _v: int = 0):
+def _cached_history_uncached(product_id: str):
     daily = cache.get_cached(product_id, 86400)
     hourly = cache.get_cached(product_id, 3600)
     return daily, hourly
 
 
+@st.cache_data(ttl=15 * 60, show_spinner=False)
+def _cached_history(product_id: str, _v: int = 0):
+    return _cached_history_uncached(product_id)
+
+
 def get_full_history(product_id: str):
     """
-    Returns whatever is cached locally (instant). If the cache is empty for
-    this product, blocks once while we fetch, then future loads are instant.
-    Triggers a background tail-refresh afterwards.
+    Instant when cached. On a cold start for a new coin we block once BUT show
+    a live progress line instead of a bare spinner, and skip the heavy hourly
+    backfill if we already have enough daily candles to render the page.
     """
     daily, hourly = _cached_history(product_id)
     if daily.empty or len(daily) < 40:
-        # one-time slow path: user picked a coin we haven't cached yet
-        with st.spinner(f"First load for {product_id} — downloading history… (this happens only once)"):
-            _refresh_product(product_id)
-        daily, hourly = cache.get_cached(product_id, 86400), cache.get_cached(product_id, 3600)
+        # cold path: keep the user informed instead of an unexplained spinner
+        ph = st.empty()
+        ph.info(f"Fetching history for **{product_id}** (first load for this coin)…")
+        _refresh_product(product_id)
+        daily, hourly = _cached_history_uncached(product_id)
+        if not daily.empty:
+            ph.success(f"Got {len(daily)} daily candles for {product_id}.")
+        else:
+            ph.empty()
     else:
         _start_refresh(product_id)
     return daily, hourly
 
 
 def prefetch_popular(products, quote: str = "USD"):
-    """Kick off background caching for popular coins so first-click is instant."""
+    """Warm the cache for popular coins in the background.
+
+    Safe to call before Streamlit has any run context: we just spawn a thread
+    that writes to the persistent SQLite cache. Never touches st.session_state.
+    """
+    ids = []
     for sym in ["BTC", "ETH", "SOL", "RENDER", "AKT", "DOGE", "XRP", "ADA"]:
         pid = f"{sym}-{quote}"
         if any(p["id"] == pid for p in products):
-            _start_refresh(pid)
+            ids.append(pid)
+
+    def warm():
+        for pid in ids:
+            try:
+                _refresh_product(pid)
+            except Exception:
+                pass
+
+    threading.Thread(target=warm, daemon=True).start()
 
 
 # ------------------------------------------------------------------ pivots

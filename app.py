@@ -22,7 +22,6 @@ from patterns import (
 st.set_page_config(page_title="TradeSnapshot", page_icon="📈", layout="wide")
 
 # ---------- inject browser local-time offset ----------
-# st.iframe is the modern (>1.33) API for this; fall back for older Streamlit
 _TZ_HTML = """
 <script>
 (function() {
@@ -39,10 +38,15 @@ _TZ_HTML = """
 })();
 </script>
 """
-if hasattr(st, "iframe"):
-    st.iframe("data:text/html," + _TZ_HTML.replace("\n", "%20"), height=0, scrolling=False)
-else:
+# components.v1.html is available on every Streamlit version; only fall back
+# to the newer iframe API if a future build removes it.
+try:
     st.components.v1.html(_TZ_HTML, height=0, scrolling=False)
+except Exception:
+    try:
+        st.iframe("data:text/html," + _TZ_HTML.replace("\n", "%20"), height=0, scrolling=False)
+    except Exception:
+        pass
 
 _qp = st.query_params.get("tz_off")
 if _qp is not None:

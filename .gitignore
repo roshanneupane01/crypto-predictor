@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Local candle cache (SQLite) — re-created at runtime on the server
+.cache/
+*.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Test artifacts
+.pytest_cache/

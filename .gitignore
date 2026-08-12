@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Test artifacts / helper scripts not needed in prod
+.pytest_cache/
+test_app.py
+seed_cache.py
+build_seed.py
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Test artifacts
+.pytest_cache/
